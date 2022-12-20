@@ -131,7 +131,7 @@ class csvColumnar(object):
 
         chunk_size = (self.__estimate_csv_rows(self.filepath, self.header) // batches)   
         files = {}        
-        format = 'csv'         
+        format = 'csv.gz' if compress else 'csv'      
 
         for chunk in self.__split_process_micropartition(self.filepath, column_value, chunk_size):
             
@@ -160,12 +160,48 @@ class csvColumnar(object):
                         
                             tasks.append(executor.submit(write_rows, files[micropartition_path], chunk[value][column]))
                                 
-                concurrent.futures.wait(tasks)
-        
+                concurrent.futures.wait(tasks)        
 
         for file in files.values():
             file.close()
+       
+    def to_micropartitions(self, sorted_column, number_partitions = 10, compress = False):
+        
+        chunk_size = (self.__estimate_csv_rows(self.filepath, self.header) // number_partitions)
+        files = {}        
+        format = 'csv.gz' if compress else 'csv'
+        chunk_number = 0
+
+        if not os.path.exists(self.folder):
+            os.makedirs(self.folder)
+
+        for chunk in self.__split_process_columnar(self.filepath, chunk_size):
+                        
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                
+                tasks = []
+                for value in chunk:
+                    
+                    t_filepath = os.path.join(self.folder, f'{value}_partition_{chunk_number}.csv')
+                    
+                    if t_filepath not in files:                            
+                        files[t_filepath] = open(t_filepath, 'a')
+                        
+                    def write_rows(file, rows):
+                        try:         
+                            file.writelines(rows)
+                            file.flush()
+                        except Exception as er:
+                            print(er)
+                    
+                    tasks.append(executor.submit(write_rows, files[t_filepath], chunk[value]))
+            
+                concurrent.futures.wait(tasks)
+            
+            chunk_number +=1    
+        
+        for file in files.values():
+            file.close()                                    
 
 csvspl = csvColumnar('csvData.csv', 'data', header = True, sep=',')
-csvspl.to_columnar_micropartitions('country',batches= 10, compress=False)
-        
+csvspl.to_micropartitions(sorted_column="", number_partitions=4, compress=False)
